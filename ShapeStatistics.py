@@ -41,8 +41,15 @@ def samplePointCloud(mesh, N):
     #uniform scale
 
     # Center the randomly distributed point cloud on its centroid.
-    c = np.mean(Ps,0)
-    Ps = Ps - c
+    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
+    p = Ps - c
+
+    # Calculate scale
+    squares = list(np.einsum("ij,ij->i", p, p))
+    sums    = np.sum(squares)
+    scale   = math.sqrt(sums/len(squares))
+    Ps      = Ps / scale
+    Ns      = Ns / scale
 
     return (Ps, Ns)
 
@@ -57,8 +64,15 @@ def getSphereSamples(res = 2):
 #Inputs: X (3 x N array representing a point cloud)
 def doPCA(X):
     ##TODO: Fill this in for a useful helper function
-    eigs = np.array([1, 1, 1]) #Dummy value
-    V = np.eye(3) #Dummy Value
+    # Centroid
+    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
+    # Stack points in rows
+    X = X.T
+    # Compute covariance matrix A = X.T * X
+    A = X.T.dot(X)
+    # Compute eigenvalues/eigenvectors of A, sorted in decreasing order
+    eigs, V = np.linalg.eig(A)
+
     return (eigs, V)
 
 #########################################################
@@ -73,14 +87,14 @@ def doPCA(X):
 #Returns: hist (histogram of length NShells)
 def getShapeHistogram(Ps, Ns, NShells, RMax):
     hist = np.zeros(NShells)                   #[0,0,0,0..NShells]
-    bins = np.linspace(0, RMax, num = NShells) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
+    bins = np.linspace(0, RMax, num = NShells+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
 
     # Center all points on the on centroid
     c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
     Ps = Ps - c
 
     # Magnitudes / Euclidean Distance
-    mags = np.sqrt(Ps.dot(Ps))
+    mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
 
     # Put em in the buckets / Return
     return np.histogram(mags, bins=bins)[0]
@@ -97,18 +111,30 @@ def getShapeShellHistogram(Ps, Ns, NShells, RMax, SPoints):
     #Create a 2D histogram that is NShells x NSectors
     hist = np.zeros((NShells, NSectors))
     ##TODO: Finish this; fill in hist, then sort sectors in descending order
+
+    # Center all points on the on centroid
+    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
+    Ps = Ps - c
+
+    # Magnitudes / Euclidean Distance
+    mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
+
+    # thetas
+    #thetas =
+
     return hist.flatten() #Flatten the 2D histogram to a 1D array
 
 #Purpose: To create shape histogram with concentric spherical shells and to
 #compute the PCA eigenvalues in each shell
 #Inputs: Ps (3 x N point cloud), Ns (3 x N array of normals) (not needed here
 #but passed along for consistency), NShells (number of shells),
-#RMax (maximum radius), sphereRes: An integer specifying points on thes phere
+#RMax (maximum radius), sphereRes: An integer specifying points on the sphere
 #to be used to cluster shells
 def getShapeHistogramPCA(Ps, Ns, NShells, RMax):
     #Create a 2D histogram, with 3 eigenvalues for each shell
     hist = np.zeros((NShells, 3))
     ##TODO: Finish this; fill in hist
+    PCA = doPCA(Ps)
     return hist.flatten() #Flatten the 2D histogram to a 1D array
 
 #Purpose: To create shape histogram of the pairwise Euclidean distances between
@@ -120,6 +146,9 @@ def getShapeHistogramPCA(Ps, Ns, NShells, RMax):
 def getD2Histogram(Ps, Ns, DMax, NBins, NSamples):
     hist = np.zeros(NBins)
     ##TODO: Finish this; fill in hist
+
+
+
     return hist
 
 #Purpose: To create shape histogram of the angles between randomly sampled
@@ -203,7 +232,7 @@ def compareHistsEuclidean(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
-    return D
+    return AllHists.T.dot(AllHists)
 
 #Purpose: To compute the cosine distance between a set
 #of histograms
@@ -215,9 +244,12 @@ def compareHistsCosine(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
-    return D
+    num = AllHists.T.dot(AllHists)
+    mag = np.asmatrix([list(np.sqrt(np.einsum("ji,ji->i", AllHists, AllHists)))
+    den = mag.T.dot(mag)
+    return num/den
 
-#Purpose: To compute the cosine distance between a set
+#Purpose: To compute the chi squared distance between a set
 #of histograms
 #Inputs: AllHists (K x N matrix of histograms, where K is the length
 #of each histogram and N is the number of point clouds)
@@ -227,6 +259,8 @@ def compareHistsChiSquared(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
+
+
     return D
 
 #Purpose: To compute the 1D Earth mover's distance between a set
@@ -277,8 +311,11 @@ def getMyShapeDistances(PointClouds, Normals):
 #recalls
 def getPrecisionRecall(D, NPerClass = 10):
     PR = np.zeros(NPerClass-1)
-    #TODO: Finish this, compute average precision recall graph
-    #using all point clouds as queries
+    #TODO: Finish this, compute average precision recall graph using all point clouds as queries
+
+    # Sort rows of D
+    s = np.argsort(D,axis=0)
+
     return PR
 
 #########################################################
@@ -291,10 +328,10 @@ if __name__ == '__main__':
     #Load in and sample all meshes
     PointClouds = []
     Normals = []
-    for i in range(1):#len(POINTCLOUD_CLASSES)):
+    for i in range(2):#len(POINTCLOUD_CLASSES)):
         print "LOADING CLASS %i of %i..."%(i, len(POINTCLOUD_CLASSES))
         PCClass = []
-        for j in range(NUM_PER_CLASS):
+        for j in range(1):#NUM_PER_CLASS):
             m = PolyMesh()
             filename = "models_off/%s%i.off"%(POINTCLOUD_CLASSES[i], j)
             print "Loading ", filename
@@ -308,3 +345,5 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
+    for i in xrange(len(PointClouds)):
+        print getShapeHistogram(PointClouds[i],Normals[i],10,.5)
