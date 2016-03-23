@@ -145,21 +145,23 @@ def getD2Histogram(Ps, Ns, DMax, NBins, NSamples):
     bins = np.linspace(0, DMax, num = NBins+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
 
     rand = np.random.random_integers(Ps.shape[1]-1, size=(NSamples,2.))
-    m = []
-    #for i in xrange(NSamples):
-    #    vec = np.asmatrix([list(Ps[:,rand[i][0]] - Ps[:,rand[i][1]])])
-    #    m.append(math.sqrt(vec.dot(vec.T)))
+    mags = []
+    '''for i in xrange(NSamples):
+        vec = np.asmatrix([list(Ps[:,rand[i][0]] - Ps[:,rand[i][1]])])
+        mags.append(math.sqrt(vec.dot(vec.T)))'''
     #print m[0]
     #def magnitudes(r):
     #    vec = np.asmatrix([list(Ps[:,r[0]] - Ps[:,r[1]])])
     #    mags.append(math.sqrt(vec.dot(vec.T)))
     r0 = rand[:,0]
     r1 = rand[:,1]
-    Ps0 = np.take(Ps,r0)
-    Ps1 = np.take(Ps,r1)
+    #print Ps.shape, Ps.T.shape
+    Ps0 = Ps[:,r0] #np.take(Ps.T,r0)
+    Ps1 = Ps[:,r1] #np.take(Ps.T,r1)
+    #print Ps0[0]
     vecs = Ps0 - Ps1
     #print vecs[0]
-    mags = np.sqrt(vecs.dot(vecs.T))
+    mags = np.sqrt(np.einsum("ji,ji->i", vecs, vecs))
     #print mags
     #np.apply_along_axis( magnitudes, axis=1, arr=rand )
     return np.histogram(mags, bins=bins)[0]
@@ -245,7 +247,10 @@ def compareHistsEuclidean(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
-    return AllHists.T.dot(AllHists)
+
+    print "AlllHISTS"
+    print AllHists
+    return np.sqrt(AllHists.T.dot(AllHists))
 
 #Purpose: To compute the cosine distance between a set
 #of histograms
@@ -329,26 +334,27 @@ def getPrecisionRecall(D, NPerClass = 10):
     # Sort rows of D
     s = np.argsort(D,axis=1)
     # Walk through
-    for i in xrange(s.shape[1]):
+    for i in xrange(s.shape[1]): # On every row we calculate the precision and recall
         iClass = i/NPerClass # the row indicates the shape
         numP = 0
         denP = 0
         numR = 0
+        #print "\nROW", i, "\n"
         for j in xrange(s.shape[1]-1,-1,-1):
             jClass = s[i, j]/NPerClass
-
+            #print i, s[i, j]
             if i != s[i, j]:
                 if iClass == jClass:
                     # num for recall go up
                     # precision increments both
 
-                    numR += 1
-                    numP += 1
-                    denP += 1
-                    #print 1.0*(1.0*numP/denP)
-                    #print (1.0/(NPerClass-1))
-                    PR[numR-1] += (1.0*numP/denP) * (1.0/NPerClass)#s * (1.0/s.shape[1])
+                    numR = numR + 1
+                    numP = numP + 1
+                    denP = denP + 1
 
+                    PR[numR-1] += (1.0*numP/denP) * (1.0/D.shape[1])# * (1.0/s.shape[1]*NPerClass)
+                    #print PR[numR-1]
+                    #print "Recall:",numR, NPerClass-1, "Precision",numP, denP
                     if numR == NPerClass - 1:
                         break
                 else:
@@ -366,7 +372,7 @@ if __name__ == '__main__':
     #Load in and sample all meshes
     PointClouds = []
     Normals = []
-    for i in range(2):#len(POINTCLOUD_CLASSES)):
+    for i in range(5):#len(POINTCLOUD_CLASSES)):
         print "LOADING CLASS %i of %i..."%(i, len(POINTCLOUD_CLASSES))
         PCClass = []
         for j in range(NUM_PER_CLASS):
@@ -383,18 +389,26 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
-    HistsEGI = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10,0.01)
-    HistsD2  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 10000)
-    DEGI  = compareHistsEuclidean(HistsEGI)
-    DD2   = compareHistsEuclidean(HistsD2)
-    PREGI = getPrecisionRecall(DEGI)
-    PRD2  = getPrecisionRecall(DD2)
+    #HistsShape = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10,0.01)
+    HistsD2  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 0.01, 30, 1000000)
+
+    #DShapeE = compareHistsEuclidean(HistsShape)
+    #DShapeC = compareHistsCosine(HistsShape)
+    DD2E    = compareHistsEuclidean(HistsD2)
+    #DD2C    = compareHistsCosine(HistsD2)
+
+    #PRShapeE = getPrecisionRecall(DShapeE)
+    #PRShapeC = getPrecisionRecall(DShapeC)
+    PRD2E    = getPrecisionRecall(DD2E)
+    #PRD2C    = getPrecisionRecall(DD2C)
     #print PREGI
 
     recalls = np.linspace(1.0/9.0, 1.0, 9)
-    plt.plot(recalls, PREGI, 'c', label='Shape')
+    #plt.plot(recalls, PRShapeC, 'c', label='Shape by Cosine')
     plt.hold(True)
-    plt.plot(recalls, PRD2, 'r', label='D2')
+    #plt.plot(recalls, PRShapeE, 'r', label='Shape by Euc')
+    #plt.plot(recalls, PRD2C, 'b', label='D2 by Cosine')
+    plt.plot(recalls, PRD2E, 'g', label='D2 by Euc')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
