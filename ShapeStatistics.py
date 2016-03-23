@@ -64,12 +64,9 @@ def getSphereSamples(res = 2):
 #Inputs: X (3 x N array representing a point cloud)
 def doPCA(X):
     ##TODO: Fill this in for a useful helper function
-    # Centroid
-    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
-    # Stack points in rows
-    X = X.T
+
     # Compute covariance matrix A = X.T * X
-    A = X.T.dot(X)
+    A = X.dot(X.T)
     # Compute eigenvalues/eigenvectors of A, sorted in decreasing order
     eigs, V = np.linalg.eig(A)
 
@@ -144,12 +141,28 @@ def getShapeHistogramPCA(Ps, Ns, NShells, RMax):
 #NBins (number of histogram bins), NSamples (number of pairs of points sample
 #to compute distances)
 def getD2Histogram(Ps, Ns, DMax, NBins, NSamples):
-    hist = np.zeros(NBins)
     ##TODO: Finish this; fill in hist
+    bins = np.linspace(0, DMax, num = NBins+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
 
-
-
-    return hist
+    rand = np.random.random_integers(Ps.shape[1]-1, size=(NSamples,2.))
+    m = []
+    #for i in xrange(NSamples):
+    #    vec = np.asmatrix([list(Ps[:,rand[i][0]] - Ps[:,rand[i][1]])])
+    #    m.append(math.sqrt(vec.dot(vec.T)))
+    #print m[0]
+    #def magnitudes(r):
+    #    vec = np.asmatrix([list(Ps[:,r[0]] - Ps[:,r[1]])])
+    #    mags.append(math.sqrt(vec.dot(vec.T)))
+    r0 = rand[:,0]
+    r1 = rand[:,1]
+    Ps0 = np.take(Ps,r0)
+    Ps1 = np.take(Ps,r1)
+    vecs = Ps0 - Ps1
+    #print vecs[0]
+    mags = np.sqrt(vecs.dot(vecs.T))
+    #print mags
+    #np.apply_along_axis( magnitudes, axis=1, arr=rand )
+    return np.histogram(mags, bins=bins)[0]
 
 #Purpose: To create shape histogram of the angles between randomly sampled
 #triples of points
@@ -245,7 +258,7 @@ def compareHistsCosine(AllHists):
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
     num = AllHists.T.dot(AllHists)
-    mag = np.asmatrix([list(np.sqrt(np.einsum("ji,ji->i", AllHists, AllHists)))
+    mag = np.asmatrix([list(np.sqrt(np.einsum("ji,ji->i", AllHists, AllHists)))])
     den = mag.T.dot(mag)
     return num/den
 
@@ -310,11 +323,36 @@ def getMyShapeDistances(PointClouds, Normals):
 #Returns PR, an (NPerClass-1) length array of average precision values for all
 #recalls
 def getPrecisionRecall(D, NPerClass = 10):
-    PR = np.zeros(NPerClass-1)
+    PR = np.zeros(NPerClass-1) # [0,0,0...]
     #TODO: Finish this, compute average precision recall graph using all point clouds as queries
-
+    # This is the average precision recall for every shape not just 1 shape
     # Sort rows of D
-    s = np.argsort(D,axis=0)
+    s = np.argsort(D,axis=1)
+    # Walk through
+    for i in xrange(s.shape[1]):
+        iClass = i/NPerClass # the row indicates the shape
+        numP = 0
+        denP = 0
+        numR = 0
+        for j in xrange(s.shape[1]-1,-1,-1):
+            jClass = s[i, j]/NPerClass
+
+            if i != s[i, j]:
+                if iClass == jClass:
+                    # num for recall go up
+                    # precision increments both
+
+                    numR += 1
+                    numP += 1
+                    denP += 1
+                    #print 1.0*(1.0*numP/denP)
+                    #print (1.0/(NPerClass-1))
+                    PR[numR-1] += (1.0*numP/denP) * (1.0/NPerClass)#s * (1.0/s.shape[1])
+
+                    if numR == NPerClass - 1:
+                        break
+                else:
+                    denP += 1
 
     return PR
 
@@ -331,7 +369,7 @@ if __name__ == '__main__':
     for i in range(2):#len(POINTCLOUD_CLASSES)):
         print "LOADING CLASS %i of %i..."%(i, len(POINTCLOUD_CLASSES))
         PCClass = []
-        for j in range(1):#NUM_PER_CLASS):
+        for j in range(NUM_PER_CLASS):
             m = PolyMesh()
             filename = "models_off/%s%i.off"%(POINTCLOUD_CLASSES[i], j)
             print "Loading ", filename
@@ -345,5 +383,19 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
-    for i in xrange(len(PointClouds)):
-        print getShapeHistogram(PointClouds[i],Normals[i],10,.5)
+    HistsEGI = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10,0.01)
+    HistsD2  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 10000)
+    DEGI  = compareHistsEuclidean(HistsEGI)
+    DD2   = compareHistsEuclidean(HistsD2)
+    PREGI = getPrecisionRecall(DEGI)
+    PRD2  = getPrecisionRecall(DD2)
+    #print PREGI
+
+    recalls = np.linspace(1.0/9.0, 1.0, 9)
+    plt.plot(recalls, PREGI, 'c', label='Shape')
+    plt.hold(True)
+    plt.plot(recalls, PRD2, 'r', label='D2')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
