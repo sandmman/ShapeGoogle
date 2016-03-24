@@ -8,9 +8,9 @@ from PolyMesh import *
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.spatial.distance import pdist, squareform
 
 POINTCLOUD_CLASSES = ['biplane', 'desk_chair', 'dining_chair', 'fighter_jet', 'fish', 'flying_bird', 'guitar', 'handgun', 'head', 'helicopter', 'human', 'human_arms_out', 'potted_plant', 'race_car', 'sedan', 'shelves', 'ship', 'sword', 'table', 'vase']
-
 NUM_PER_CLASS = 10
 
 #########################################################
@@ -43,13 +43,12 @@ def samplePointCloud(mesh, N):
     # Center the randomly distributed point cloud on its centroid.
     c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
     p = Ps - c
-
     # Calculate scale
-    squares = list(np.einsum("ij,ij->i", p, p))
+    squares = list(np.einsum("ji,ji->i", p, p))
     sums    = np.sum(squares)
     scale   = math.sqrt(sums/len(squares))
+    # Apply Scale
     Ps      = Ps / scale
-    Ns      = Ns / scale
 
     return (Ps, Ns)
 
@@ -85,16 +84,10 @@ def doPCA(X):
 def getShapeHistogram(Ps, Ns, NShells, RMax):
     hist = np.zeros(NShells)                   #[0,0,0,0..NShells]
     bins = np.linspace(0, RMax, num = NShells+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
-
-    # Center all points on the on centroid
-    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
-    Ps = Ps - c
-
     # Magnitudes / Euclidean Distance
     mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
-
     # Put em in the buckets / Return
-    return np.histogram(mags, bins=bins)[0]
+    return np.histogram(mags, bins=bins, density=True)[0]
 
 #Purpose: To create shape histogram with concentric spherical shells and
 #sectors within each shell, sorted in decreasing order of number of points
@@ -108,14 +101,12 @@ def getShapeShellHistogram(Ps, Ns, NShells, RMax, SPoints):
     #Create a 2D histogram that is NShells x NSectors
     hist = np.zeros((NShells, NSectors))
     ##TODO: Finish this; fill in hist, then sort sectors in descending order
-
     # Center all points on the on centroid
-    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
-    Ps = Ps - c
+    #c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
+    #Ps = Ps - c
 
     # Magnitudes / Euclidean Distance
     mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
-
     # thetas
     #thetas =
 
@@ -131,8 +122,17 @@ def getShapeHistogramPCA(Ps, Ns, NShells, RMax):
     #Create a 2D histogram, with 3 eigenvalues for each shell
     hist = np.zeros((NShells, 3))
     ##TODO: Finish this; fill in hist
+    bins = np.linspace(0, RMax, num = (NShells*3)+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
+    # Magnitudes / Euclidean Distance
+    mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
+    numpy.digitize(mags, bins) # index of bin that mags is in
+
     PCA = doPCA(Ps)
-    return hist.flatten() #Flatten the 2D histogram to a 1D array
+    # Put em in the buckets / Return
+    return np.histogram(mags, bins=bins, density=True)[0].flatten()
+
+
+    #return hist #Flatten the 2D histogram to a 1D array
 
 #Purpose: To create shape histogram of the pairwise Euclidean distances between
 #randomly sampled points in the point cloud
@@ -144,27 +144,18 @@ def getD2Histogram(Ps, Ns, DMax, NBins, NSamples):
     ##TODO: Finish this; fill in hist
     bins = np.linspace(0, DMax, num = NBins+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
 
-    rand = np.random.random_integers(Ps.shape[1]-1, size=(NSamples,2.))
-    mags = []
-    '''for i in xrange(NSamples):
-        vec = np.asmatrix([list(Ps[:,rand[i][0]] - Ps[:,rand[i][1]])])
-        mags.append(math.sqrt(vec.dot(vec.T)))'''
-    #print m[0]
-    #def magnitudes(r):
-    #    vec = np.asmatrix([list(Ps[:,r[0]] - Ps[:,r[1]])])
-    #    mags.append(math.sqrt(vec.dot(vec.T)))
+    rand = np.random.random_integers(Ps.shape[1]-1, size=(NSamples,2))
+
     r0 = rand[:,0]
     r1 = rand[:,1]
-    #print Ps.shape, Ps.T.shape
+
     Ps0 = Ps[:,r0] #np.take(Ps.T,r0)
     Ps1 = Ps[:,r1] #np.take(Ps.T,r1)
-    #print Ps0[0]
+
     vecs = Ps0 - Ps1
-    #print vecs[0]
     mags = np.sqrt(np.einsum("ji,ji->i", vecs, vecs))
-    #print mags
-    #np.apply_along_axis( magnitudes, axis=1, arr=rand )
-    return np.histogram(mags, bins=bins)[0]
+
+    return np.histogram(mags, bins=bins, density=True)[0] #np.histogram(mags, bins=bins)[0]
 
 #Purpose: To create shape histogram of the angles between randomly sampled
 #triples of points
@@ -174,7 +165,42 @@ def getD2Histogram(Ps, Ns, DMax, NBins, NSamples):
 def getA3Histogram(Ps, Ns, NBins, NSamples):
     hist = np.zeros(NBins)
     ##TODO: Finish this; fill in hist
-    return hist
+    bins = np.linspace(0, 3.141596, num = NBins+1)
+    rand = np.random.random_integers(Ps.shape[1]-1, size=(NSamples,3))
+
+    r0 = rand[:,0]
+    r1 = rand[:,1]
+    r2 = rand[:,2]
+
+    Ps0 = Ps[:,r0] #np.take(Ps.T,r0)
+    Ps1 = Ps[:,r1] #np.take(Ps.T,r1)
+    Ps2 = Ps[:,r2] #np.take(Ps.T,r1)
+
+    #Get appropriate vectos Ps0 -> Ps1 and Ps1 -> Ps2
+    vec01 = Ps1 - Ps0
+    vec12 = Ps2 - Ps1
+
+    # Normalized Vectors
+    norms01 = np.linalg.norm(vec01,axis=0)
+    norms12 = np.linalg.norm(vec12, axis=0)
+
+    vec01 = vec01.astype('float') / norms01
+    vec12 = vec12.astype('float') / norms12
+
+    ### theta = a dot b / ||a||||b|| ###
+
+    # Dot product
+    num = np.einsum("ji,ji->i", vec01, vec12) # 1xN array
+
+    # Magnitudes of vectors
+    mag01 = np.sqrt(np.einsum("ji,ji->i", vec01, vec01))
+    mag12 = np.sqrt(np.einsum("ji,ji->i", vec12, vec12))
+
+    den = mag01 * mag12 #1xN
+
+    CosThetas = num / den
+    ArcCosT = np.arccos(CosThetas)
+    return np.histogram(ArcCosT, bins=bins, density=True)[0]
 
 #Purpose: To create the Extended Gaussian Image by binning normals to
 #sphere directions after rotating the point cloud to align with its principal axes
@@ -184,7 +210,12 @@ def getA3Histogram(Ps, Ns, NBins, NSamples):
 def getEGIHistogram(Ps, Ns, SPoints):
     S = SPoints.shape[1]
     hist = np.zeros(S)
-    ##TOOD: Finish this; fill in hist
+    # TODO: Finish this; fill in hist
+    # Project all points on PCA Axis
+    eigVal, eigVec = doPCA(Ps)
+    axis = eigVec[-1]
+
+    projPS = ((Ps.T.dot(axis)) / axis.T.dot(axis)) * axis
     return hist
 
 #Purpose: To create an image which stores the amalgamation of rotating
@@ -197,7 +228,20 @@ def getEGIHistogram(Ps, Ns, SPoints):
 def getSpinImage(Ps, Ns, NAngles, Extent, Dim):
     #Create an image
     hist = np.zeros((Dim, Dim))
-    #TODO: Finish this
+    # TODO: Finish this
+    # Project all points on PCA Axis
+    eigVal, eigVec = doPCA(Ps)
+    Paxis = eigVec[-1]
+
+    projPS = ((Ps.T.dot(Paxis)) / axis.T.dot(Paxis)) * axis
+
+
+    angle = 2*math.PI / NAngles
+    for i in xrange(NAngles):
+        ang = angle * i
+        planeNorm = 0
+        #bin stuff
+
     return hist.flatten()
 
 
@@ -247,10 +291,8 @@ def compareHistsEuclidean(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
-
-    print "AlllHISTS"
-    print AllHists
     return np.sqrt(AllHists.T.dot(AllHists))
+    #return squareform(pdist(AllHists.T, metric="euclidean", p=2))
 
 #Purpose: To compute the cosine distance between a set
 #of histograms
@@ -291,6 +333,8 @@ def compareHistsEMD1D(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
+    cdfs = np.sum(AllHists, axis=0)
+
     return D
 
 
@@ -339,22 +383,17 @@ def getPrecisionRecall(D, NPerClass = 10):
         numP = 0
         denP = 0
         numR = 0
-        #print "\nROW", i, "\n"
         for j in xrange(s.shape[1]-1,-1,-1):
             jClass = s[i, j]/NPerClass
-            #print i, s[i, j]
             if i != s[i, j]:
                 if iClass == jClass:
-                    # num for recall go up
-                    # precision increments both
 
                     numR = numR + 1
                     numP = numP + 1
                     denP = denP + 1
 
                     PR[numR-1] += (1.0*numP/denP) * (1.0/D.shape[1])# * (1.0/s.shape[1]*NPerClass)
-                    #print PR[numR-1]
-                    #print "Recall:",numR, NPerClass-1, "Precision",numP, denP
+                    
                     if numR == NPerClass - 1:
                         break
                 else:
@@ -372,7 +411,7 @@ if __name__ == '__main__':
     #Load in and sample all meshes
     PointClouds = []
     Normals = []
-    for i in range(5):#len(POINTCLOUD_CLASSES)):
+    for i in range(len(POINTCLOUD_CLASSES)):
         print "LOADING CLASS %i of %i..."%(i, len(POINTCLOUD_CLASSES))
         PCClass = []
         for j in range(NUM_PER_CLASS):
@@ -389,26 +428,32 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
-    #HistsShape = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10,0.01)
-    HistsD2  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 0.01, 30, 1000000)
+    HistsShape  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
+    HistsD2     = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000000)
+    HistsA3     = makeAllHistograms(PointClouds, Normals, getA3Histogram, 30, 100000)
 
-    #DShapeE = compareHistsEuclidean(HistsShape)
-    #DShapeC = compareHistsCosine(HistsShape)
+    DShapeE = compareHistsEuclidean(HistsShape)
+    DShapeC = compareHistsCosine(HistsShape)
     DD2E    = compareHistsEuclidean(HistsD2)
-    #DD2C    = compareHistsCosine(HistsD2)
+    DD2C    = compareHistsCosine(HistsD2)
+    DA3E    = compareHistsEuclidean(HistsA3)
+    DA3C    = compareHistsCosine(HistsA3)
 
-    #PRShapeE = getPrecisionRecall(DShapeE)
-    #PRShapeC = getPrecisionRecall(DShapeC)
+    PRShapeE = getPrecisionRecall(DShapeE)
+    PRShapeC = getPrecisionRecall(DShapeC)
     PRD2E    = getPrecisionRecall(DD2E)
-    #PRD2C    = getPrecisionRecall(DD2C)
-    #print PREGI
+    PRD2C    = getPrecisionRecall(DD2C)
+    PRA3E    = getPrecisionRecall(DA3E)
+    PRA3C    = getPrecisionRecall(DA3C)
 
     recalls = np.linspace(1.0/9.0, 1.0, 9)
-    #plt.plot(recalls, PRShapeC, 'c', label='Shape by Cosine')
     plt.hold(True)
-    #plt.plot(recalls, PRShapeE, 'r', label='Shape by Euc')
-    #plt.plot(recalls, PRD2C, 'b', label='D2 by Cosine')
-    plt.plot(recalls, PRD2E, 'g', label='D2 by Euc')
+    plt.plot(recalls, PRA3E, 'b', label='A3 w/ Euc')
+    plt.plot(recalls, PRD2E, 'g', label='D2 w/ Euc')
+    plt.plot(recalls, PRShapeE, 'cyan', label='Shape w/ Euc')
+    plt.plot(recalls, PRA3C, 'y', label='A3 w/ Cos')
+    plt.plot(recalls, PRD2C, 'r', label='D2 w/ Cos')
+    plt.plot(recalls, PRShapeC, 'black', label='Shape w/ Cos')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
