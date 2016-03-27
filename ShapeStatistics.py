@@ -9,6 +9,7 @@ from PolyMesh import *
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import pdist, squareform
+#from sklearn.metrics.pairwise import chi2_kernel
 
 POINTCLOUD_CLASSES = ['biplane', 'desk_chair', 'dining_chair', 'fighter_jet', 'fish', 'flying_bird', 'guitar', 'handgun', 'head', 'helicopter', 'human', 'human_arms_out', 'potted_plant', 'race_car', 'sedan', 'shelves', 'ship', 'sword', 'table', 'vase']
 NUM_PER_CLASS = 10
@@ -42,9 +43,9 @@ def samplePointCloud(mesh, N):
 
     # Center the randomly distributed point cloud on its centroid.
     c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
-    p = Ps - c
+    Ps = Ps - c
     # Calculate scale
-    squares = list(np.einsum("ji,ji->i", p, p))
+    squares = list(np.einsum("ji,ji->i", Ps, Ps))
     sums    = np.sum(squares)
     scale   = math.sqrt(sums/len(squares))
     # Apply Scale
@@ -67,9 +68,14 @@ def doPCA(X):
     # Compute covariance matrix A = X.T * X
     A = X.dot(X.T)
     # Compute eigenvalues/eigenvectors of A, sorted in decreasing order
-    eigs, V = np.linalg.eig(A)
 
-    return (eigs, V)
+    eigenValues, eigenVectors = np.linalg.eig(A)
+
+    idx = eigenValues.argsort()[::-1]
+    eigenValues = eigenValues[idx]
+    eigenVectors = eigenVectors[:,idx]
+
+    return (eigenValues, eigenVectors)
 
 #########################################################
 ##                SHAPE DESCRIPTORS                    ##
@@ -95,21 +101,33 @@ def getShapeHistogram(Ps, Ns, NShells, RMax):
 #but passed along for consistency), NShells (number of shells),
 #RMax (maximum radius), SPoints: A 3 x S array of points sampled evenly on
 #the unit sphere (get these with the function "getSphereSamples")
+def between(bin1,bin2,pt):
+    print pt.shape
+    mag = np.linalg.norm(pt)
+    print "norm",mag
+    if  mag >= bin1 and mag < bin2:
+        return True
+    return False
 def getShapeShellHistogram(Ps, Ns, NShells, RMax, SPoints):
     NSectors = SPoints.shape[1] #A number of sectors equal to the number of
     #points sampled on the sphere
     #Create a 2D histogram that is NShells x NSectors
     hist = np.zeros((NShells, NSectors))
+    bins = np.linspace(0, RMax, num = NShells*NSectors)
     ##TODO: Finish this; fill in hist, then sort sectors in descending order
-    # Center all points on the on centroid
-    #c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
-    #Ps = Ps - c
 
-    # Magnitudes / Euclidean Distance
+    # Find which ring its in
     mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
-    # thetas
-    #thetas =
 
+    #XSub = X[:, X[0, :] > 0] #Select all points with first coordinate greater than zero
+    for i in xrange(len(bins)-1):
+        ptsInSector = Ps[:, Ps[0, :] > 0]
+        #ptsInSector = Ps[:, math.sqrt(Ps[0, :]**2 + Ps[0, :]**2 + Ps[0, :]**2) >= bins[i] and (math.sqrt(Ps[0, :]**2 + Ps[0, :]**2 + Ps[0, :]**2)) < bins[i+1]]
+        #print Ps
+        #print ptsInSector.shape
+    # Find its sectors
+    simil = Ps.T.dot(SPoints) # Each point is in the sector it is most similar to
+    #np.histogram(mags, bins=bins, density=True)[0]
     return hist.flatten() #Flatten the 2D histogram to a 1D array
 
 #Purpose: To create shape histogram with concentric spherical shells and to
@@ -155,8 +173,8 @@ def getD2Histogram(Ps, Ns, DMax, NBins, NSamples):
     vecs = Ps0 - Ps1
     mags = np.sqrt(np.einsum("ji,ji->i", vecs, vecs))
 
-    return np.histogram(mags, bins=bins, density=True)[0] #np.histogram(mags, bins=bins)[0]
-
+    hist = np.histogram(mags, bins=bins, density=True)[0] #np.histogram(mags, bins=bins)[0]
+    return hist
 #Purpose: To create shape histogram of the angles between randomly sampled
 #triples of points
 #Inputs: Ps (3 x N point cloud), Ns (3 x N array of normals) (not needed here
@@ -213,7 +231,7 @@ def getEGIHistogram(Ps, Ns, SPoints):
     # TODO: Finish this; fill in hist
     # Project all points on PCA Axis
     eigVal, eigVec = doPCA(Ps)
-    axis = eigVec[-1]
+    axis = eigVec[:,-1]
 
     projPS = ((Ps.T.dot(axis)) / axis.T.dot(axis)) * axis
     return hist
@@ -230,19 +248,39 @@ def getSpinImage(Ps, Ns, NAngles, Extent, Dim):
     hist = np.zeros((Dim, Dim))
     # TODO: Finish this
     # Project all points on PCA Axis
+    bins = np.linspace(0, Extent, num = Dim+1)
     eigVal, eigVec = doPCA(Ps)
-    Paxis = eigVec[-1]
+    pAxis  = eigVec[:,0]
+    mAxis1 = eigVec[:,1]
+    mAxis2 = eigVec[:,2]
+    projPs = np.asarray((Ps.T.dot(pAxis)) / pAxis.T.dot(pAxis))[:,0]
 
-    projPS = ((Ps.T.dot(Paxis)) / axis.T.dot(Paxis)) * axis
-
-
-    angle = 2*math.PI / NAngles
+    angle = 2 * math.pi/ NAngles
     for i in xrange(NAngles):
         ang = angle * i
-        planeNorm = 0
-        #bin stuff
+        vec = mAxis1 * math.cos(ang) + mAxis2 * math.sin(ang)
+        # plane is now defined by pAxis and vec
+        projVec = np.asarray((Ps.T.dot(vec)) / vec.T.dot(vec))[:,0]
+        tmpHist = np.histogram2d(projVec,projPs,bins=(bins,bins),normed=True)[0]
+        hist += tmpHist / NAngles
 
     return hist.flatten()
+
+
+def getSpinImageFast(Ps, Ns, NAngles, Extent, Dim):
+    #Create an image
+    hist = np.zeros((Dim, Dim))
+    # TODO: Finish this
+    # Project all points on PCA Axis
+    bins = np.linspace(0, Extent, num = Dim+1)
+    eigVal, eigVec = doPCA(Ps)
+    pAxis  = eigVec[:,0]
+    projPs = np.asarray((Ps.T.dot(pAxis)) / pAxis.T.dot(pAxis))[:,0]
+
+    perpProj = Ps - pAxis.dot(pAxis.T).dot(Ps)
+    mags     = np.sqrt(np.einsum("ji,ji->i", perpProj, perpProj))
+
+    return np.histogram2d(mags,projPs,bins=(bins,bins),normed=True)[0].flatten()
 
 
 #Purpose: To create a histogram of spherical harmonic magnitudes in concentric
@@ -291,8 +329,11 @@ def compareHistsEuclidean(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
-    return np.sqrt(AllHists.T.dot(AllHists))
-    #return squareform(pdist(AllHists.T, metric="euclidean", p=2))
+    dotX = np.sum(AllHists**2, 0)[:, None]
+    dotY = np.sum(AllHists**2, 0)[None, :]
+    D = dotX + dotY - 2*AllHists.T.dot(AllHists)
+
+    return np.sqrt(np.around(D, decimals=10))
 
 #Purpose: To compute the cosine distance between a set
 #of histograms
@@ -307,7 +348,8 @@ def compareHistsCosine(AllHists):
     num = AllHists.T.dot(AllHists)
     mag = np.asmatrix([list(np.sqrt(np.einsum("ji,ji->i", AllHists, AllHists)))])
     den = mag.T.dot(mag)
-    return num/den
+
+    return np.arccos(num/den)
 
 #Purpose: To compute the chi squared distance between a set
 #of histograms
@@ -319,8 +361,8 @@ def compareHistsChiSquared(AllHists):
     N = AllHists.shape[1]
     D = np.zeros((N, N))
     #TODO: Finish this, fill in D
-
-
+    histSums = np.sum(AllHists, 0)[:, None] # creates 1 column of vectors
+    res = histSums[np.newaxis, :] - histSums[:, np.newaxis]
     return D
 
 #Purpose: To compute the 1D Earth mover's distance between a set
@@ -383,7 +425,7 @@ def getPrecisionRecall(D, NPerClass = 10):
         numP = 0
         denP = 0
         numR = 0
-        for j in xrange(s.shape[1]-1,-1,-1):
+        for j in xrange(s.shape[1]):
             jClass = s[i, j]/NPerClass
             if i != s[i, j]:
                 if iClass == jClass:
@@ -392,8 +434,8 @@ def getPrecisionRecall(D, NPerClass = 10):
                     numP = numP + 1
                     denP = denP + 1
 
-                    PR[numR-1] += (1.0*numP/denP) * (1.0/D.shape[1])# * (1.0/s.shape[1]*NPerClass)
-                    
+                    PR[numR-1] += (1.0*numP/denP) * (1.0/D.shape[1])
+
                     if numR == NPerClass - 1:
                         break
                 else:
@@ -412,6 +454,7 @@ if __name__ == '__main__':
     PointClouds = []
     Normals = []
     for i in range(len(POINTCLOUD_CLASSES)):
+
         print "LOADING CLASS %i of %i..."%(i, len(POINTCLOUD_CLASSES))
         PCClass = []
         for j in range(NUM_PER_CLASS):
@@ -428,33 +471,125 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
-    HistsShape  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
-    HistsD2     = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000000)
-    HistsA3     = makeAllHistograms(PointClouds, Normals, getA3Histogram, 30, 100000)
+    #HistsShape1    = makeAllHistograms(PointClouds, Normals, getShapeShellHistogram, 1, 5, getSphereSamples())
+    HistsSpin = makeAllHistograms(PointClouds, Normals, getSpinImage,100, 2, 40)
+    HistsSpinFast = makeAllHistograms(PointClouds, Normals, getSpinImageFast,100, 2, 40)
 
-    DShapeE = compareHistsEuclidean(HistsShape)
-    DShapeC = compareHistsCosine(HistsShape)
-    DD2E    = compareHistsEuclidean(HistsD2)
-    DD2C    = compareHistsCosine(HistsD2)
-    DA3E    = compareHistsEuclidean(HistsA3)
-    DA3C    = compareHistsCosine(HistsA3)
-
-    PRShapeE = getPrecisionRecall(DShapeE)
-    PRShapeC = getPrecisionRecall(DShapeC)
-    PRD2E    = getPrecisionRecall(DD2E)
-    PRD2C    = getPrecisionRecall(DD2C)
-    PRA3E    = getPrecisionRecall(DA3E)
-    PRA3C    = getPrecisionRecall(DA3C)
+    DSpin = compareHistsEuclidean(HistsSpin)
+    DSpinF = compareHistsEuclidean(HistsSpinFast)
+    PRSpin = getPrecisionRecall(DSpin)
+    PRSpinF = getPrecisionRecall(DSpinF)
 
     recalls = np.linspace(1.0/9.0, 1.0, 9)
     plt.hold(True)
-    plt.plot(recalls, PRA3E, 'b', label='A3 w/ Euc')
-    plt.plot(recalls, PRD2E, 'g', label='D2 w/ Euc')
-    plt.plot(recalls, PRShapeE, 'cyan', label='Shape w/ Euc')
-    plt.plot(recalls, PRA3C, 'y', label='A3 w/ Cos')
-    plt.plot(recalls, PRD2C, 'r', label='D2 w/ Cos')
-    plt.plot(recalls, PRShapeC, 'black', label='Shape w/ Cos')
+    plt.plot(recalls, PRSpin, 'b', label='Spin')
+    plt.plot(recalls, PRSpinF, 'g', label='Spin Fast')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
     plt.show()
+    '''HistsShape1    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
+    HistsShape10   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10, 5)
+    HistsShape20   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 20, 5)
+    HistsShape30   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
+
+    HistsD2100     = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100)
+    HistsD21000    = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000)
+    HistsD210000   = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 10000)
+    HistsD2100000  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100000)
+    HistsD21000000 = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000000)
+
+    HistsA3        = makeAllHistograms(PointClouds, Normals, getA3Histogram, 30, 100000)
+
+    DShapeE1  = compareHistsEuclidean(HistsShape1)
+    DShapeE10 = compareHistsEuclidean(HistsShape10)
+    DShapeE20 = compareHistsEuclidean(HistsShape20)
+    DShapeE30 = compareHistsEuclidean(HistsShape30)
+
+    DShapeC  = compareHistsCosine(HistsShape1)
+    #DShapeCS = compareHistsChiSquared(HistsShape1)
+
+    DD2E100     = compareHistsEuclidean(HistsD2100)
+    DD2E1000    = compareHistsEuclidean(HistsD21000)
+    DD2E10000   = compareHistsEuclidean(HistsD210000)
+    DD2E100000  = compareHistsEuclidean(HistsD2100000)
+    DD2E1000000 = compareHistsEuclidean(HistsD21000000)
+    DD2C        = compareHistsCosine(HistsD21000000)
+    #DD2CS = compareHistsChiSquared(HistsD2)
+
+    DA3E    = compareHistsEuclidean(HistsA3)
+    DA3C    = compareHistsCosine(HistsA3)
+    #DA3CHS = compareHistsChiSquared(HistsA3)
+
+    PRShapeE1  = getPrecisionRecall(DShapeE1)
+    PRShapeE10 = getPrecisionRecall(DShapeE10)
+    PRShapeE20 = getPrecisionRecall(DShapeE20)
+    PRShapeE30 = getPrecisionRecall(DShapeE30)
+    PRShapeC   = getPrecisionRecall(DShapeC)
+    #PRShapeCS = getPrecisionRecall(DShapeCS)
+
+    PRD2E100     = getPrecisionRecall(DD2E100)
+    PRD2E1000    = getPrecisionRecall(DD2E1000)
+    PRD2E10000   = getPrecisionRecall(DD2E10000)
+    PRD2E100000  = getPrecisionRecall(DD2E100000)
+    PRD2E1000000 = getPrecisionRecall(DD2E1000000)
+
+    PRD2C    = getPrecisionRecall(DD2C)
+    #PRD2CS   = getPrecisionRecall(DD2CS)
+
+    PRA3E    = getPrecisionRecall(DA3E)
+    PRA3C    = getPrecisionRecall(DA3C)
+    #PRA3CS   = getPrecisionRecall(DA3CS)
+
+    recalls = np.linspace(1.0/9.0, 1.0, 9)
+
+    plt.figure(0)
+    plt.hold(True)
+    plt.title('Histogram Comparison by Cosine Distance')
+    plt.plot(recalls, PRA3C,    'y',    label='A3')
+    plt.plot(recalls, PRD2C,    'r',    label='D2')
+    plt.plot(recalls, PRShapeC, 'black',label='Shape')
+    #ax1.plot(recalls, PRShapeCS, 'black', label='Shape')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
+
+
+    plt.figure(1)
+    plt.hold(True)
+    plt.title('Histogram Comparison by Euclidean Distance')
+    plt.plot(recalls, PRA3E,     'b',    label='A3')
+    plt.plot(recalls, PRD2E1000000,     'g',    label='D2')
+    plt.plot(recalls, PRShapeE30,'cyan', label='Shape')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
+
+
+    plt.figure(2)
+    plt.hold(True)
+    plt.title('Shell Histogram Comparison by Euclidean Dist. w/diff. # of bins')
+    plt.plot(recalls, PRShapeE1,  'g',    label='1 bin')
+    plt.plot(recalls, PRShapeE10, 'cyan', label='10 bins')
+    plt.plot(recalls, PRShapeE20, 'red',  label='20 bins')
+    plt.plot(recalls, PRShapeE30, 'b',    label='30 bins')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
+
+
+    plt.figure(3)
+    plt.hold(True)
+    plt.title('D2 Histogram Comparison by Euclidean Dist. w/diff. # of Samples')
+    plt.plot(recalls, PRD2E100,     'g',    label='100 Samples')
+    plt.plot(recalls, PRD2E1000,    'g',    label='1000 Samples')
+    plt.plot(recalls, PRD2E10000,   'cyan', label='10000 Samples')
+    plt.plot(recalls, PRD2E100000,  'red',  label='100000 Samples')
+    plt.plot(recalls, PRD2E1000000, 'b',    label='1000000 Samples')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()'''
