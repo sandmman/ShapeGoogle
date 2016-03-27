@@ -101,32 +101,35 @@ def getShapeHistogram(Ps, Ns, NShells, RMax):
 #but passed along for consistency), NShells (number of shells),
 #RMax (maximum radius), SPoints: A 3 x S array of points sampled evenly on
 #the unit sphere (get these with the function "getSphereSamples")
-def between(bin1,bin2,pt):
-    print pt.shape
-    mag = np.linalg.norm(pt)
-    print "norm",mag
-    if  mag >= bin1 and mag < bin2:
-        return True
-    return False
+
 def getShapeShellHistogram(Ps, Ns, NShells, RMax, SPoints):
     NSectors = SPoints.shape[1] #A number of sectors equal to the number of
     #points sampled on the sphere
     #Create a 2D histogram that is NShells x NSectors
     hist = np.zeros((NShells, NSectors))
-    bins = np.linspace(0, RMax, num = NShells*NSectors)
+    bins = np.linspace(0, NSectors, num = NSectors+1)
     ##TODO: Finish this; fill in hist, then sort sectors in descending order
 
     # Find which ring its in
     mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
+    ptsInSector = Ps[:, 0]
 
-    #XSub = X[:, X[0, :] > 0] #Select all points with first coordinate greater than zero
-    for i in xrange(len(bins)-1):
-        ptsInSector = Ps[:, Ps[0, :] > 0]
-        #ptsInSector = Ps[:, math.sqrt(Ps[0, :]**2 + Ps[0, :]**2 + Ps[0, :]**2) >= bins[i] and (math.sqrt(Ps[0, :]**2 + Ps[0, :]**2 + Ps[0, :]**2)) < bins[i+1]]
-        #print Ps
-        #print ptsInSector.shape
+    for i in xrange(NShells):
+        # All points in a particular bin
+        p = Ps.T
+        ptsInShell = p[(np.linalg.norm(p, axis=1) >= bins[i]) & (bins[i+1] > np.linalg.norm(p, axis=1)) & (np.linalg.norm(p, axis=1) <= RMax) ].T
+        # Find each point's sector
+        dots = ptsInShell.T.dot(SPoints) # Nx66
+        # Indirectly sorts smallest to largest and gives a column vector containing the index of the ith point's sector
+        a = np.argsort(dots,axis=1)[:,0]
+        shellHist = np.histogram(a, bins=bins, density=True)[0]
+        hist[i,: ] = np.asmatrix(list(shellHist))
+        print shellHist.shape
+
+
+
     # Find its sectors
-    simil = Ps.T.dot(SPoints) # Each point is in the sector it is most similar to
+    #simil = Ps.T.dot(SPoints) # Each point is in the sector it is most similar to
     #np.histogram(mags, bins=bins, density=True)[0]
     return hist.flatten() #Flatten the 2D histogram to a 1D array
 
@@ -140,16 +143,17 @@ def getShapeHistogramPCA(Ps, Ns, NShells, RMax):
     #Create a 2D histogram, with 3 eigenvalues for each shell
     hist = np.zeros((NShells, 3))
     ##TODO: Finish this; fill in hist
-    bins = np.linspace(0, RMax, num = (NShells*3)+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
+    bins = np.linspace(0, RMax, num = NShells+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
     # Magnitudes / Euclidean Distance
     mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
-    numpy.digitize(mags, bins) # index of bin that mags is in
+    for i in xrange(NShells):
+        p = Ps.T
+        ptsInShell = p[(np.linalg.norm(p, axis=1) >= bins[i]) & (bins[i+1] > np.linalg.norm(p, axis=1)) & (np.linalg.norm(p, axis=1) <= RMax) ].T
+        eigVal,eigVec = doPCA(ptsInShell)
+        hist[i,:] = eigVal
 
-    PCA = doPCA(Ps)
     # Put em in the buckets / Return
-    return np.histogram(mags, bins=bins, density=True)[0].flatten()
-
-
+    return np.asarray(hist.flatten())
     #return hist #Flatten the 2D histogram to a 1D array
 
 #Purpose: To create shape histogram of the pairwise Euclidean distances between
@@ -332,8 +336,8 @@ def compareHistsEuclidean(AllHists):
     dotX = np.sum(AllHists**2, 0)[:, None]
     dotY = np.sum(AllHists**2, 0)[None, :]
     D = dotX + dotY - 2*AllHists.T.dot(AllHists)
-
-    return np.sqrt(np.around(D, decimals=10))
+    D[D < 0] = 0
+    return np.sqrt(D)
 
 #Purpose: To compute the cosine distance between a set
 #of histograms
@@ -358,12 +362,23 @@ def compareHistsCosine(AllHists):
 #Returns: D (An N x N matrix, where the ij entry is the chi squared
 #distance between the histogram for point cloud i and point cloud j)
 def compareHistsChiSquared(AllHists):
-    N = AllHists.shape[1]
-    D = np.zeros((N, N))
-    #TODO: Finish this, fill in D
-    histSums = np.sum(AllHists, 0)[:, None] # creates 1 column of vectors
-    res = histSums[np.newaxis, :] - histSums[:, np.newaxis]
-    return D
+    shape = (AllHist.shape[1], AllHists.shape[1])
+    def chiSquaredDist(a,b):
+        h1 = AllHists[:,a]
+        h2 = AllHists[:,b]
+        f = np.vectorize(indvChiSquared)
+        return np.sum(f(h1.flatten(), h2.flatten()), dtype=float)
+    def indvChiSquared(a, b):
+        n = 2 * np.square(a - b)
+        d = a + b
+        if n ==0:
+            return 0
+        return (n / float(d))
+
+    f = np.vectorize(chiSquaredDist)
+    x = np.fromfunction(lambda i, j: f(i, j), shape, dtype=int)
+    return x
+
 
 #Purpose: To compute the 1D Earth mover's distance between a set
 #of histograms (note that this only makes sense for 1D histograms)
@@ -471,27 +486,36 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
-    #HistsShape1    = makeAllHistograms(PointClouds, Normals, getShapeShellHistogram, 1, 5, getSphereSamples())
-    HistsSpin = makeAllHistograms(PointClouds, Normals, getSpinImage,100, 2, 40)
+
+    HistsShape1   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
+    HistsShapePCA = makeAllHistograms(PointClouds, Normals, getShapeHistogramPCA, 30, 5)
+
+    DShapeE1       = compareHistsEuclidean(HistsShape1)
+    PRShapeE1      = getPrecisionRecall(DShapeE1)
+    DShapeEPCA       = compareHistsEuclidean(HistsShapePCA)
+    PRShapeEPCA      = getPrecisionRecall(DShapeEPCA)
+    recalls = np.linspace(1.0/9.0, 1.0, 9)
+    plt.hold(True)
+    plt.plot(recalls, PRShapeEPCA, 'b', label='shapeShell')
+    plt.plot(recalls, PRShapeE1, 'g', label='Shells')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
+    '''HistsSpin = makeAllHistograms(PointClouds, Normals, getSpinImage,100, 2, 40)
     HistsSpinFast = makeAllHistograms(PointClouds, Normals, getSpinImageFast,100, 2, 40)
 
     DSpin = compareHistsEuclidean(HistsSpin)
     DSpinF = compareHistsEuclidean(HistsSpinFast)
     PRSpin = getPrecisionRecall(DSpin)
     PRSpinF = getPrecisionRecall(DSpinF)
+    '''
 
-    recalls = np.linspace(1.0/9.0, 1.0, 9)
-    plt.hold(True)
-    plt.plot(recalls, PRSpin, 'b', label='Spin')
-    plt.plot(recalls, PRSpinF, 'g', label='Spin Fast')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.legend()
-    plt.show()
-    '''HistsShape1    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
-    HistsShape10   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10, 5)
-    HistsShape20   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 20, 5)
-    HistsShape30   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
+    '''HistsShape1   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
+    HistsShape10  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10, 5)
+    HistsShape20  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 20, 5)
+    HistsShape30  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
+    HistsShapePCA = makeAllHistograms(PointClouds, Normals, getShapeHistogramPCA, 30, 5)
 
     HistsD2100     = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100)
     HistsD21000    = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000)
@@ -501,10 +525,11 @@ if __name__ == '__main__':
 
     HistsA3        = makeAllHistograms(PointClouds, Normals, getA3Histogram, 30, 100000)
 
-    DShapeE1  = compareHistsEuclidean(HistsShape1)
-    DShapeE10 = compareHistsEuclidean(HistsShape10)
-    DShapeE20 = compareHistsEuclidean(HistsShape20)
-    DShapeE30 = compareHistsEuclidean(HistsShape30)
+    DShapeE1   = compareHistsEuclidean(HistsShape1)
+    DShapeE10  = compareHistsEuclidean(HistsShape10)
+    DShapeE20  = compareHistsEuclidean(HistsShape20)
+    DShapeE30  = compareHistsEuclidean(HistsShape30)
+    DShapeEPCA = compareHistsEuclidean(HistsShapePCA)
 
     DShapeC  = compareHistsCosine(HistsShape1)
     #DShapeCS = compareHistsChiSquared(HistsShape1)
@@ -521,12 +546,13 @@ if __name__ == '__main__':
     DA3C    = compareHistsCosine(HistsA3)
     #DA3CHS = compareHistsChiSquared(HistsA3)
 
-    PRShapeE1  = getPrecisionRecall(DShapeE1)
-    PRShapeE10 = getPrecisionRecall(DShapeE10)
-    PRShapeE20 = getPrecisionRecall(DShapeE20)
-    PRShapeE30 = getPrecisionRecall(DShapeE30)
-    PRShapeC   = getPrecisionRecall(DShapeC)
-    #PRShapeCS = getPrecisionRecall(DShapeCS)
+    PRShapeE1   = getPrecisionRecall(DShapeE1)
+    PRShapeE10  = getPrecisionRecall(DShapeE10)
+    PRShapeE20  = getPrecisionRecall(DShapeE20)
+    PRShapeE30  = getPrecisionRecall(DShapeE30)
+    PRShapeC    = getPrecisionRecall(DShapeC)
+    #PRShapeCS  = getPrecisionRecall(DShapeCS)
+    PRShapeEPCA = getPrecisionRecall(DShapeEPCA)
 
     PRD2E100     = getPrecisionRecall(DD2E100)
     PRD2E1000    = getPrecisionRecall(DD2E1000)
