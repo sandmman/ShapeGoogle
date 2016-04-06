@@ -1,2 +1,2 @@
 # ShapeGoogle
-Recognizes input shapes based on point cloud database
+Implements various shape descriptor histograms applied to a database of point clouds and analyzes their ability to recognize input shape similarity.

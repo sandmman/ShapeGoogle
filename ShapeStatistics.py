@@ -107,31 +107,26 @@ def getShapeShellHistogram(Ps, Ns, NShells, RMax, SPoints):
     #points sampled on the sphere
     #Create a 2D histogram that is NShells x NSectors
     hist = np.zeros((NShells, NSectors))
-    bins = np.linspace(0, NSectors, num = NSectors+1)
+    binsShells  = np.linspace(0, RMax, num = NShells+1) # np.linspace(2.0, 3.0, num=5)  // array([ 2.  ,  2.25,  2.5 ,  2.75,  3.  ])
+    binsSectors = np.linspace(0, NSectors, num = NSectors+1)
     ##TODO: Finish this; fill in hist, then sort sectors in descending order
 
     # Find which ring its in
-    mags = np.sqrt(np.einsum("ji,ji->i", Ps, Ps))
-    ptsInSector = Ps[:, 0]
-
     for i in xrange(NShells):
         # All points in a particular bin
-        p = Ps.T
-        ptsInShell = p[(np.linalg.norm(p, axis=1) >= bins[i]) & (bins[i+1] > np.linalg.norm(p, axis=1)) & (np.linalg.norm(p, axis=1) <= RMax) ].T
+        p = Ps.T # N x 3
+        ptsInShell = p[(np.linalg.norm(p, axis=1) >= binsShells[i]) & (binsShells[i+1] > np.linalg.norm(p, axis=1)) ].T  #Nx3 - #3xN
         # Find each point's sector
         dots = ptsInShell.T.dot(SPoints) # Nx66
         # Indirectly sorts smallest to largest and gives a column vector containing the index of the ith point's sector
         a = np.argsort(dots,axis=1)[:,0]
-        shellHist = np.histogram(a, bins=bins, density=True)[0]
-        hist[i,: ] = np.asmatrix(list(shellHist))
-        print shellHist.shape
+        shellHist = np.sort(np.histogram(a, bins=binsSectors)[0])
 
+        hist[i,: ] = shellHist
 
-
-    # Find its sectors
-    #simil = Ps.T.dot(SPoints) # Each point is in the sector it is most similar to
-    #np.histogram(mags, bins=bins, density=True)[0]
-    return hist.flatten() #Flatten the 2D histogram to a 1D array
+    hist = hist.flatten()
+    dot = hist.dot(hist.T)
+    return  hist / np.sqrt(dot) #Flatten the 2D histogram to a 1D array
 
 #Purpose: To create shape histogram with concentric spherical shells and to
 #compute the PCA eigenvalues in each shell
@@ -362,7 +357,7 @@ def compareHistsCosine(AllHists):
 #Returns: D (An N x N matrix, where the ij entry is the chi squared
 #distance between the histogram for point cloud i and point cloud j)
 def compareHistsChiSquared(AllHists):
-    shape = (AllHist.shape[1], AllHists.shape[1])
+    shape = (AllHists.shape[1], AllHists.shape[1])
     def chiSquaredDist(a,b):
         h1 = AllHists[:,a]
         h2 = AllHists[:,b]
@@ -486,96 +481,112 @@ if __name__ == '__main__':
     #just want to load one point cloud and test your histograms on that first
     #so you don't have to wait for all point clouds to load when making
     #minor tweaks
-
-    HistsShape1   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
-    HistsShapePCA = makeAllHistograms(PointClouds, Normals, getShapeHistogramPCA, 30, 5)
-
-    DShapeE1       = compareHistsEuclidean(HistsShape1)
-    PRShapeE1      = getPrecisionRecall(DShapeE1)
-    DShapeEPCA       = compareHistsEuclidean(HistsShapePCA)
-    PRShapeEPCA      = getPrecisionRecall(DShapeEPCA)
     recalls = np.linspace(1.0/9.0, 1.0, 9)
-    plt.hold(True)
-    plt.plot(recalls, PRShapeEPCA, 'b', label='shapeShell')
-    plt.plot(recalls, PRShapeE1, 'g', label='Shells')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.legend()
-    plt.show()
-    '''HistsSpin = makeAllHistograms(PointClouds, Normals, getSpinImage,100, 2, 40)
-    HistsSpinFast = makeAllHistograms(PointClouds, Normals, getSpinImageFast,100, 2, 40)
 
-    DSpin = compareHistsEuclidean(HistsSpin)
-    DSpinF = compareHistsEuclidean(HistsSpinFast)
-    PRSpin = getPrecisionRecall(DSpin)
-    PRSpinF = getPrecisionRecall(DSpinF)
-    '''
+    #print "Make historgrams"
+    # Make All Histograms { Shell, Shell/Sector, Shell/PCA, D2, A3, Spin
+    HistsShape1     = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
+    HistsShape10    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10, 5)
+    HistsShape20    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 20, 5)
+    HistsShape30    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
+    HistsShapePCA   = makeAllHistograms(PointClouds, Normals, getShapeHistogramPCA, 30, 5)
+    HistsShapeShell = makeAllHistograms(PointClouds, Normals, getShapeShellHistogram, 30, 5, getSphereSamples(2))
+    HistsShapePCA   = makeAllHistograms(PointClouds, Normals, getShapeHistogramPCA, 30, 5)
+    HistsD2100      = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100)
+    HistsD21000     = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000)
+    HistsD210000    = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 10000)
+    HistsD2100000   = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100000)
+    HistsD21000000  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000000)
+    HistsA3         = makeAllHistograms(PointClouds, Normals, getA3Histogram, 30, 100000)
+    HistsSpin       = makeAllHistograms(PointClouds, Normals, getSpinImage,100, 2, 40)
+    HistsSpinFast   = makeAllHistograms(PointClouds, Normals, getSpinImageFast,100, 2, 40)
 
-    '''HistsShape1   = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
-    HistsShape10  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10, 5)
-    HistsShape20  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 20, 5)
-    HistsShape30  = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
-    HistsShapePCA = makeAllHistograms(PointClouds, Normals, getShapeHistogramPCA, 30, 5)
+    #### Compare Histograms ####
 
-    HistsD2100     = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100)
-    HistsD21000    = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000)
-    HistsD210000   = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 10000)
-    HistsD2100000  = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 100000)
-    HistsD21000000 = makeAllHistograms(PointClouds, Normals, getD2Histogram, 3.0, 30, 1000000)
+    # Shapes
+    DShape_E1        = compareHistsEuclidean(HistsShape1)
+    DShape_E10       = compareHistsEuclidean(HistsShape10)
+    DShape_E20       = compareHistsEuclidean(HistsShape20)
+    DShape_E30       = compareHistsEuclidean(HistsShape30)
+    DShape_C         = compareHistsCosine(HistsShape30)
+    DShape_CS        = compareHistsChiSquared(HistsShape30)
+    # Shape / Sector
+    DShapeShell_E    = compareHistsEuclidean(HistsShapeShell)
+    DShapeShell_C    = compareHistsCosine(HistsShapeShell)
+    DShapeShell_CS   = compareHistsCosine(HistsShapeShell)
+    # Shape / PCA
+    DShapePCA_E      = compareHistsEuclidean(HistsShapePCA)
+    DShapePCA_C      = compareHistsCosine(HistsShapePCA)
+    DShapePCA_CS     = compareHistsCosine(HistsShapePCA)
+    # D2
+    DD2_E100         = compareHistsEuclidean(HistsD2100)
+    DD2_E1000        = compareHistsEuclidean(HistsD21000)
+    DD2_E10000       = compareHistsEuclidean(HistsD210000)
+    DD2_E100000      = compareHistsEuclidean(HistsD2100000)
+    DD2_E1000000     = compareHistsEuclidean(HistsD21000000)
+    DD2_C            = compareHistsCosine(HistsD21000000)
+    DD2_CS           = compareHistsChiSquared(HistsD21000000)
+    # A3
+    DA3_E            = compareHistsEuclidean(HistsA3)
+    DA3_C            = compareHistsCosine(HistsA3)
+    DA3_CS           = compareHistsChiSquared(HistsA3)
+    # Spin
+    DSpin_E          = compareHistsEuclidean(HistsSpin)
+    DSpin_C          = compareHistsCosine(HistsSpin)
+    DSpin_CS         = compareHistsChiSquared(HistsSpin)
+    DSpinF_E         = compareHistsEuclidean(HistsSpinFast)
+    DSpinF_C         = compareHistsCosine(HistsSpinFast)
+    DSpinF_CS        = compareHistsChiSquared(HistsSpinFast)
 
-    HistsA3        = makeAllHistograms(PointClouds, Normals, getA3Histogram, 30, 100000)
+    ### Precision Recall Graphs
+    # Shapes
+    PRShape_E1       = getPrecisionRecall(DShape_E1)
+    PRShape_E10      = getPrecisionRecall(DShape_E10)
+    PRShape_E20      = getPrecisionRecall(DShape_E20)
+    PRShape_E30      = getPrecisionRecall(DShape_E30)
+    PRShape_C        = getPrecisionRecall(DShape_C)
+    PRShape_CS       = getPrecisionRecall(DShape_CS)
+    # Shape / Sector
+    PRShapeShell_E   = getPrecisionRecall(DShapeShell_E)
+    PRShapeShell_C   = getPrecisionRecall(DShapeShell_C)
+    PRShapeShell_CS  = getPrecisionRecall(DShapeShell_CS)
+    # Shape / PCA
+    PRShapePCA_E     = getPrecisionRecall(DShapePCA_E)
+    PRShapePCA_C     = getPrecisionRecall(DShapePCA_C)
+    PRShapePCA_CS    = getPrecisionRecall(DShapePCA_CS)
+    # D2
+    PRD2_E100        = getPrecisionRecall(DD2_E100)
+    PRD2_E1000       = getPrecisionRecall(DD2_E1000)
+    PRD2_E10000      = getPrecisionRecall(DD2_E10000)
+    PRD2_E100000     = getPrecisionRecall(DD2_E100000)
+    PRD2_E1000000    = getPrecisionRecall(DD2_E1000000)
+    PRD2_C           = getPrecisionRecall(DD2_C)
+    PRD2_CS          = getPrecisionRecall(DD2_CS)
+    # A3
+    PRA3_E           = getPrecisionRecall(DA3_E)
+    PRA3_C           = getPrecisionRecall(DA3_C)
+    PRA3_CS          = getPrecisionRecall(DA3_CS)
+    # Spin
+    PRSpin_E         = getPrecisionRecall(DSpin_E)
+    PRSpin_C         = getPrecisionRecall(DSpin_C)
+    PRSpin_CS        = getPrecisionRecall(DSpin_CS)
+    PRSpinF_E        = getPrecisionRecall(DSpinF_E)
+    PRSpinF_C        = getPrecisionRecall(DSpinF_C)
+    PRSpinF_CS       = getPrecisionRecall(DSpinF_CS)
 
-    DShapeE1   = compareHistsEuclidean(HistsShape1)
-    DShapeE10  = compareHistsEuclidean(HistsShape10)
-    DShapeE20  = compareHistsEuclidean(HistsShape20)
-    DShapeE30  = compareHistsEuclidean(HistsShape30)
-    DShapeEPCA = compareHistsEuclidean(HistsShapePCA)
-
-    DShapeC  = compareHistsCosine(HistsShape1)
-    #DShapeCS = compareHistsChiSquared(HistsShape1)
-
-    DD2E100     = compareHistsEuclidean(HistsD2100)
-    DD2E1000    = compareHistsEuclidean(HistsD21000)
-    DD2E10000   = compareHistsEuclidean(HistsD210000)
-    DD2E100000  = compareHistsEuclidean(HistsD2100000)
-    DD2E1000000 = compareHistsEuclidean(HistsD21000000)
-    DD2C        = compareHistsCosine(HistsD21000000)
-    #DD2CS = compareHistsChiSquared(HistsD2)
-
-    DA3E    = compareHistsEuclidean(HistsA3)
-    DA3C    = compareHistsCosine(HistsA3)
-    #DA3CHS = compareHistsChiSquared(HistsA3)
-
-    PRShapeE1   = getPrecisionRecall(DShapeE1)
-    PRShapeE10  = getPrecisionRecall(DShapeE10)
-    PRShapeE20  = getPrecisionRecall(DShapeE20)
-    PRShapeE30  = getPrecisionRecall(DShapeE30)
-    PRShapeC    = getPrecisionRecall(DShapeC)
-    #PRShapeCS  = getPrecisionRecall(DShapeCS)
-    PRShapeEPCA = getPrecisionRecall(DShapeEPCA)
-
-    PRD2E100     = getPrecisionRecall(DD2E100)
-    PRD2E1000    = getPrecisionRecall(DD2E1000)
-    PRD2E10000   = getPrecisionRecall(DD2E10000)
-    PRD2E100000  = getPrecisionRecall(DD2E100000)
-    PRD2E1000000 = getPrecisionRecall(DD2E1000000)
-
-    PRD2C    = getPrecisionRecall(DD2C)
-    #PRD2CS   = getPrecisionRecall(DD2CS)
-
-    PRA3E    = getPrecisionRecall(DA3E)
-    PRA3C    = getPrecisionRecall(DA3C)
-    #PRA3CS   = getPrecisionRecall(DA3CS)
-
+    print "Graphing!"
     recalls = np.linspace(1.0/9.0, 1.0, 9)
 
     plt.figure(0)
     plt.hold(True)
-    plt.title('Histogram Comparison by Cosine Distance')
-    plt.plot(recalls, PRA3C,    'y',    label='A3')
-    plt.plot(recalls, PRD2C,    'r',    label='D2')
-    plt.plot(recalls, PRShapeC, 'black',label='Shape')
-    #ax1.plot(recalls, PRShapeCS, 'black', label='Shape')
+    plt.title('Descriptor Comparison by Cosine Distance')
+    plt.plot(recalls, PRShape_C,        'b',label='Shell')
+    plt.plot(recalls, PRShapeShell_C,   'g',label='Shell Sector')
+    plt.plot(recalls, PRShapePCA_C,     'r',label='PCA')
+    plt.plot(recalls, PRD2_C,           'c',label='D2')
+    plt.plot(recalls, PRA3_C,           'm',label='A3')
+    plt.plot(recalls, PRSpin_C,         'y',label='Spin')
+    plt.plot(recalls, PRSpinF_C,        'k',label='SpinF')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
@@ -584,23 +595,28 @@ if __name__ == '__main__':
 
     plt.figure(1)
     plt.hold(True)
-    plt.title('Histogram Comparison by Euclidean Distance')
-    plt.plot(recalls, PRA3E,     'b',    label='A3')
-    plt.plot(recalls, PRD2E1000000,     'g',    label='D2')
-    plt.plot(recalls, PRShapeE30,'cyan', label='Shape')
+    plt.title('Descriptor Comparison by Euclidean Distance')
+    plt.plot(recalls, PRShape_E30,      'k',label='Shell')
+    plt.plot(recalls, PRShapeShell_E,   'b',label='Shell Sector')
+    plt.plot(recalls, PRShapePCA_E,     'g',label='PCA')
+    plt.plot(recalls, PRD2_E1000000,    'm',label='D2')
+    plt.plot(recalls, PRA3_E,           'y',label='A3')
+    plt.plot(recalls, PRSpin_E,         'b',label='Spin')
+    plt.plot(recalls, PRSpinF_E,        'r',label='SpinF')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
     plt.show()
 
-
     plt.figure(2)
     plt.hold(True)
-    plt.title('Shell Histogram Comparison by Euclidean Dist. w/diff. # of bins')
-    plt.plot(recalls, PRShapeE1,  'g',    label='1 bin')
-    plt.plot(recalls, PRShapeE10, 'cyan', label='10 bins')
-    plt.plot(recalls, PRShapeE20, 'red',  label='20 bins')
-    plt.plot(recalls, PRShapeE30, 'b',    label='30 bins')
+    plt.title('Descriptor Comparison by ChiSquared Distance')
+    plt.plot(recalls, PRShape_CS,       'k',label='Shell')
+    plt.plot(recalls, PRShapeShell_CS,  'g',label='Shell Sector ')
+    plt.plot(recalls, PRShapePCA_CS,    'r',label='Shell PCA')
+    plt.plot(recalls, PRD2_CS,          'c',label='D2')
+    plt.plot(recalls, PRA3_CS,          'm',label='A3')
+    plt.plot(recalls, PRSpinF_CS,       'b',label='SpinF CS')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
@@ -609,13 +625,50 @@ if __name__ == '__main__':
 
     plt.figure(3)
     plt.hold(True)
-    plt.title('D2 Histogram Comparison by Euclidean Dist. w/diff. # of Samples')
-    plt.plot(recalls, PRD2E100,     'g',    label='100 Samples')
-    plt.plot(recalls, PRD2E1000,    'g',    label='1000 Samples')
-    plt.plot(recalls, PRD2E10000,   'cyan', label='10000 Samples')
-    plt.plot(recalls, PRD2E100000,  'red',  label='100000 Samples')
-    plt.plot(recalls, PRD2E1000000, 'b',    label='1000000 Samples')
+    plt.title('Shell Histogram Comparison by Euclidean Dist. w/diff. # of bins')
+    plt.plot(recalls, PRShape_E1,  'r',label='Shell -1')
+    plt.plot(recalls, PRShape_E10, 'k',label='Shell -10')
+    plt.plot(recalls, PRShape_E20, 'y',label='Shell -20')
+    plt.plot(recalls, PRShape_E30, 'b',label='Shell -30')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
-    plt.show()'''
+    plt.show()
+
+    plt.figure(4)
+    plt.hold(True)
+    plt.title('D2 Histogram Comparison by Euclidean Dist. w/diff. # of Samples')
+    plt.plot(recalls, PRD2_E100, 'r',label='D2 -100')
+    plt.plot(recalls, PRD2_E1000, 'g',label='D2 -1000')
+    plt.plot(recalls, PRD2_E10000, 'b',label='D2 -10000')
+    plt.plot(recalls, PRD2_E100000, 'y',label='D2 -100000')
+    plt.plot(recalls, PRD2_E1000000, 'k',label='D2 -1000000')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
+
+    plt.figure(5)
+    plt.hold(True)
+    plt.title('D2 Descriptor w/diff. comparisons')
+    plt.plot(recalls, PRD2_E1000000,'r',label='D2 Euc')
+    plt.plot(recalls, PRD2_C,       'b',label='D2 Cos')
+    plt.plot(recalls, PRD2_CS,      'g',label='D2 ChiSq')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
+
+    plt.figure(6)
+    plt.hold(True)
+    plt.title('Spin and SpinF Descriptors w/diff. comparisons')
+    plt.plot(recalls, PRSpin_E,     'r',label='Spin E')
+    plt.plot(recalls, PRSpin_C,     'm',label='Spin C')
+    plt.plot(recalls, PRSpin_CS,    'y',label='Spin CS')
+    plt.plot(recalls, PRSpinF_E,    'g',label='SpinF E')
+    plt.plot(recalls, PRSpinF_C,    'b',label='SpinF C')
+    plt.plot(recalls, PRSpinF_CS,   'k',label='SpinF CS')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.legend()
+    plt.show()
