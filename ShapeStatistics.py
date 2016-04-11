@@ -9,7 +9,6 @@ from PolyMesh import *
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.distance import pdist, squareform
-#from sklearn.metrics.pairwise import chi2_kernel
 
 POINTCLOUD_CLASSES = ['biplane', 'desk_chair', 'dining_chair', 'fighter_jet', 'fish', 'flying_bird', 'guitar', 'handgun', 'head', 'helicopter', 'human', 'human_arms_out', 'potted_plant', 'race_car', 'sedan', 'shelves', 'ship', 'sword', 'table', 'vase']
 NUM_PER_CLASS = 10
@@ -271,14 +270,23 @@ def getSpinImageFast(Ps, Ns, NAngles, Extent, Dim):
     hist = np.zeros((Dim, Dim))
     # TODO: Finish this
     # Project all points on PCA Axis
+    print Ps.shape
     bins = np.linspace(0, Extent, num = Dim+1)
     eigVal, eigVec = doPCA(Ps)
     pAxis  = eigVec[:,0]
     projPs = np.asarray((Ps.T.dot(pAxis)) / pAxis.T.dot(pAxis))[:,0]
-
     perpProj = Ps - pAxis.dot(pAxis.T).dot(Ps)
     mags     = np.sqrt(np.einsum("ji,ji->i", perpProj, perpProj))
 
+    heatmap, xedges, yedges = np.histogram2d(mags,projPs,bins=(bins,bins),normed=True)
+    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+    print heatmap
+    plt.clf()
+    plt.imshow(heatmap, extent=extent)
+    plt.show()
+    f = open( 'file.py', 'w' )
+    f.write( 'dict = ' + repr(heatmap) + '\n' )
+    f.close()
     return np.histogram2d(mags,projPs,bins=(bins,bins),normed=True)[0].flatten()
 
 
@@ -463,7 +471,7 @@ if __name__ == '__main__':
     #Load in and sample all meshes
     PointClouds = []
     Normals = []
-    for i in range(len(POINTCLOUD_CLASSES)):
+    '''for i in range(len(POINTCLOUD_CLASSES)):
 
         print "LOADING CLASS %i of %i..."%(i, len(POINTCLOUD_CLASSES))
         PCClass = []
@@ -472,10 +480,36 @@ if __name__ == '__main__':
             filename = "models_off/%s%i.off"%(POINTCLOUD_CLASSES[i], j)
             print "Loading ", filename
             m.loadOffFileExternal(filename)
+
             (Ps, Ns) = samplePointCloud(m, NRandSamples)
             PointClouds.append(Ps)
-            Normals.append(Ps)
+            Normals.append(Ps)'''
+    Ps = np.load("../data_0.npy")
+    print Ps.shape
 
+    Ps = Ps[:,:100]
+    print Ps.shape
+    Ps = Ps[1:4,:]
+    print Ps.shape
+    '''m = PolyMesh()
+    filename = "models_off/biplane0.off"
+    print "Loading ", filename
+    m.loadOffFileExternal(filename)
+    (Ps, Ns) = samplePointCloud(m, 10000)
+    # Center the randomly distributed point cloud on its centroid'''
+    #Ps = Ps.T
+    c  = np.asmatrix([list(np.mean(Ps, axis=1))]).T
+    print c
+    Ps = Ps - c
+    # Calculate scale
+    squares = list(np.einsum("ji,ji->i", Ps, Ps))
+    sums    = np.sum(squares)
+    scale   = math.sqrt(sums/len(squares))
+    # Apply Scale
+    Ps      = Ps / scale
+
+    PointClouds.append(Ps)
+    Normals.append(Ps)
 
     #TODO: Finish this, run experiments.  Also in the above code, you might
     #just want to load one point cloud and test your histograms on that first
@@ -483,9 +517,11 @@ if __name__ == '__main__':
     #minor tweaks
     recalls = np.linspace(1.0/9.0, 1.0, 9)
 
+    HistsSpin       = makeAllHistograms(PointClouds, Normals, getSpinImageFast,100, 2, 40)
+
     #print "Make historgrams"
     # Make All Histograms { Shell, Shell/Sector, Shell/PCA, D2, A3, Spin
-    HistsShape1     = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
+    '''HistsShape1     = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 1, 5)
     HistsShape10    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 10, 5)
     HistsShape20    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 20, 5)
     HistsShape30    = makeAllHistograms(PointClouds, Normals, getShapeHistogram, 30, 5)
@@ -671,4 +707,4 @@ if __name__ == '__main__':
     plt.xlabel('Recall')
     plt.ylabel('Precision')
     plt.legend()
-    plt.show()
+    plt.show()'''
